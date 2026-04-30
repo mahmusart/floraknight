@@ -1,11 +1,13 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, Image,
   ActivityIndicator, ScrollView, Animated, Easing,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Sharing from 'expo-sharing';
 import { identifyPlant } from './plantNet';
 import { getSafetyInfo, getCategoryStyle } from './plantSafety';
+import ShareCard from './ShareCard';
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -13,7 +15,9 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [sharing, setSharing] = useState(false);
   const cameraRef = useRef(null);
+  const shareRef = useRef(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
 
   if (!permission) return <View style={styles.container} />;
@@ -55,6 +59,7 @@ export default function App() {
     setResult(null);
     setError(null);
     setScanning(false);
+    setSharing(false);
   };
 
   const takePhoto = async () => {
@@ -78,6 +83,38 @@ export default function App() {
       setScanning(false);
     }
   };
+
+  const handleShare = async () => {
+    if (!shareRef.current) return;
+    try {
+      setSharing(true);
+      const uri = await shareRef.current.capture();
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        alert('Sharing is not available on this device');
+        return;
+      }
+      await Sharing.shareAsync(uri, {
+        mimeType: 'image/png',
+        dialogTitle: 'Share your FloraKnight discovery',
+      });
+    } catch (e) {
+      console.log('Share cancelled or failed:', e);
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  // Compute safety outside JSX so hooks stay consistent
+  const safety = result
+    ? getSafetyInfo(result.scientificName) || {
+        category: 'unknown',
+        summary: 'Safety data not yet in our codex for this species. Research before handling or consuming.',
+        uses: [],
+        warnings: [],
+      }
+    : null;
+  const catStyle = safety ? getCategoryStyle(safety.category) : null;
 
   // Result screen
   if (photo) {
@@ -118,95 +155,107 @@ export default function App() {
               </View>
             )}
 
-            {result && (() => {
-              const safety = getSafetyInfo(result.scientificName) || {
-                category: 'unknown',
-                summary: 'Safety information not yet available for this species. Treat as unknown — do not consume.',
-                uses: [],
-                warnings: [],
-              };
-              const catStyle = getCategoryStyle(safety.category);
+            {result && safety && catStyle && (
+              <>
+                <Text style={styles.codexTag}>SUBJECT IDENTIFIED</Text>
+                <Text style={styles.species}>{result.commonName}</Text>
+                <Text style={styles.latin}>{result.scientificName}</Text>
 
-              return (
-                <>
-                  <Text style={styles.codexTag}>SUBJECT IDENTIFIED</Text>
-                  <Text style={styles.species}>{result.commonName}</Text>
-                  <Text style={styles.latin}>{result.scientificName}</Text>
-
-                  <View style={[
-                    styles.safetyBadge,
-                    { borderColor: catStyle.color, backgroundColor: catStyle.color + '15' },
-                  ]}>
-                    <Text style={[styles.safetyIcon, { color: catStyle.color }]}>
-                      {catStyle.icon}
+                <View style={[
+                  styles.safetyBadge,
+                  { borderColor: catStyle.color, backgroundColor: catStyle.color + '15' },
+                ]}>
+                  <Text style={[styles.safetyIcon, { color: catStyle.color }]}>
+                    {catStyle.icon}
+                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.safetyLabel, { color: catStyle.color }]}>
+                      {catStyle.label}
                     </Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.safetyLabel, { color: catStyle.color }]}>
-                        {catStyle.label}
-                      </Text>
-                      <Text style={styles.safetySummary}>{safety.summary}</Text>
-                    </View>
+                    <Text style={styles.safetySummary}>{safety.summary}</Text>
                   </View>
+                </View>
 
-                  {safety.category === 'toxic' && (
-                    <View style={styles.dangerBanner}>
-                      <Text style={styles.dangerText}>
-                        ⚠ DO NOT CONSUME — KEEP AWAY FROM CHILDREN AND PETS
-                      </Text>
-                    </View>
-                  )}
-
-                  <View style={styles.confidenceBox}>
-                    <Text style={styles.label}>MATCH CONFIDENCE</Text>
-                    <Text style={styles.confidenceValue}>{result.confidence}%</Text>
-                    <View style={styles.confBar}>
-                      <View style={[styles.confFill, { width: `${result.confidence}%` }]} />
-                    </View>
+                {safety.category === 'toxic' && (
+                  <View style={styles.dangerBanner}>
+                    <Text style={styles.dangerText}>
+                      ⚠ DO NOT CONSUME — KEEP AWAY FROM CHILDREN AND PETS
+                    </Text>
                   </View>
+                )}
 
-                  {safety.uses.length > 0 && (
-                    <View style={styles.infoCard}>
-                      <Text style={styles.cardTitle}>USES</Text>
-                      {safety.uses.map((use, i) => (
-                        <Text key={i} style={styles.cardText}>• {use}</Text>
-                      ))}
-                    </View>
-                  )}
+                <View style={styles.confidenceBox}>
+                  <Text style={styles.label}>MATCH CONFIDENCE</Text>
+                  <Text style={styles.confidenceValue}>{result.confidence}%</Text>
+                  <View style={styles.confBar}>
+                    <View style={[styles.confFill, { width: `${result.confidence}%` }]} />
+                  </View>
+                </View>
 
-                  {safety.warnings.length > 0 && (
-                    <View style={[styles.infoCard, { borderLeftColor: '#ffb454' }]}>
-                      <Text style={[styles.cardTitle, { color: '#ffb454' }]}>WARNINGS</Text>
-                      {safety.warnings.map((warn, i) => (
-                        <Text key={i} style={styles.cardText}>• {warn}</Text>
-                      ))}
-                    </View>
-                  )}
-
+                {safety.uses.length > 0 && (
                   <View style={styles.infoCard}>
-                    <Text style={styles.cardTitle}>TAXONOMY</Text>
-                    <Text style={styles.cardText}>Family: {result.family}</Text>
-                    <Text style={styles.cardText}>Genus: {result.genus}</Text>
+                    <Text style={styles.cardTitle}>USES</Text>
+                    {safety.uses.map((use, i) => (
+                      <Text key={i} style={styles.cardText}>• {use}</Text>
+                    ))}
                   </View>
+                )}
 
-                  {result.allMatches.length > 1 && (
-                    <View style={styles.infoCard}>
-                      <Text style={styles.cardTitle}>OTHER POSSIBILITIES</Text>
-                      {result.allMatches.slice(1).map((m, i) => (
-                        <Text key={i} style={styles.cardText}>
-                          {m.commonName} — {m.confidence}%
-                        </Text>
-                      ))}
-                    </View>
-                  )}
-                </>
-              );
-            })()}
+                {safety.warnings.length > 0 && (
+                  <View style={[styles.infoCard, { borderLeftColor: '#ffb454' }]}>
+                    <Text style={[styles.cardTitle, { color: '#ffb454' }]}>WARNINGS</Text>
+                    {safety.warnings.map((warn, i) => (
+                      <Text key={i} style={styles.cardText}>• {warn}</Text>
+                    ))}
+                  </View>
+                )}
+
+                <View style={styles.infoCard}>
+                  <Text style={styles.cardTitle}>TAXONOMY</Text>
+                  <Text style={styles.cardText}>Family: {result.family}</Text>
+                  <Text style={styles.cardText}>Genus: {result.genus}</Text>
+                </View>
+
+                {result.allMatches.length > 1 && (
+                  <View style={styles.infoCard}>
+                    <Text style={styles.cardTitle}>OTHER POSSIBILITIES</Text>
+                    {result.allMatches.slice(1).map((m, i) => (
+                      <Text key={i} style={styles.cardText}>
+                        {m.commonName} — {m.confidence}%
+                      </Text>
+                    ))}
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={styles.shareBtn}
+                  onPress={handleShare}
+                  disabled={sharing}
+                >
+                  <Text style={styles.shareBtnText}>
+                    {sharing ? 'PREPARING...' : '↗ SHARE DISCOVERY'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
 
             <TouchableOpacity style={styles.btn} onPress={reset}>
               <Text style={styles.btnText}>Scan another</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
+
+        {/* Hidden share card — rendered off-screen for capture */}
+        {result && safety && (
+          <View style={styles.offscreen}>
+            <ShareCard
+              ref={shareRef}
+              photo={photo}
+              result={result}
+              safety={safety}
+            />
+          </View>
+        )}
       </View>
     );
   }
@@ -326,4 +375,19 @@ const styles = StyleSheet.create({
     borderRadius: 6, marginTop: 8, alignSelf: 'center',
   },
   btnText: { color: '#0a1a1f', fontWeight: '700', letterSpacing: 2, fontSize: 12 },
+
+  shareBtn: {
+    backgroundColor: 'rgba(243, 196, 106, 0.15)',
+    borderWidth: 1, borderColor: '#f3c46a',
+    paddingHorizontal: 28, paddingVertical: 14,
+    borderRadius: 6, marginTop: 4, marginBottom: 4, alignSelf: 'center',
+  },
+  shareBtnText: {
+    color: '#f3c46a', fontWeight: '700', letterSpacing: 2, fontSize: 12,
+  },
+
+  offscreen: {
+    position: 'absolute',
+    top: -9999, left: -9999,
+  },
 });
