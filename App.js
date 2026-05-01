@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, Image,
   ActivityIndicator, ScrollView, Animated, Easing,
@@ -7,7 +7,9 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Sharing from 'expo-sharing';
 import { identifyPlant } from './plantNet';
 import { getSafetyInfo, getCategoryStyle } from './plantSafety';
+import { saveScan } from './database';
 import ShareCard from './ShareCard';
+import CodexScreen from './CodexScreen';
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -16,6 +18,8 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [sharing, setSharing] = useState(false);
+  const [screen, setScreen] = useState('scanner'); // 'scanner' or 'codex'
+  const [codexEntry, setCodexEntry] = useState(null); // viewing a saved entry
   const cameraRef = useRef(null);
   const shareRef = useRef(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
@@ -60,6 +64,7 @@ export default function App() {
     setError(null);
     setScanning(false);
     setSharing(false);
+    setCodexEntry(null);
   };
 
   const takePhoto = async () => {
@@ -76,6 +81,16 @@ export default function App() {
         new Promise(resolve => setTimeout(resolve, 1200)),
       ]);
       setResult(identified);
+
+      // Auto-save to codex
+      const safety = getSafetyInfo(identified.scientificName) || {
+        category: 'unknown', summary: '', uses: [], warnings: [],
+      };
+      try {
+        await saveScan(identified, safety, captured.uri);
+      } catch (saveErr) {
+        console.log('Save to codex failed:', saveErr);
+      }
     } catch (e) {
       await new Promise(resolve => setTimeout(resolve, 800));
       setError(e.message);
@@ -105,9 +120,15 @@ export default function App() {
     }
   };
 
-  // Compute safety outside JSX so hooks stay consistent
-  const safety = result
-    ? getSafetyInfo(result.scientificName) || {
+  const handleViewEntry = (entry) => {
+    setCodexEntry(entry);
+    setScreen('scanner');
+  };
+
+  // Compute safety
+  const activeResult = codexEntry || result;
+  const safety = activeResult
+    ? getSafetyInfo(activeResult.scientificName) || {
         category: 'unknown',
         summary: 'Safety data not yet in our codex for this species. Research before handling or consuming.',
         uses: [],
@@ -116,7 +137,101 @@ export default function App() {
     : null;
   const catStyle = safety ? getCategoryStyle(safety.category) : null;
 
-  // Result screen
+  // ========== CODEX SCREEN ==========
+  if (screen === 'codex') {
+    return (
+      <CodexScreen
+        onBack={() => { reset(); setScreen('scanner'); }}
+        onViewEntry={handleViewEntry}
+      />
+    );
+  }
+
+  // ========== CODEX ENTRY VIEW ==========
+  if (codexEntry) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.previewContainer}>
+          {codexEntry.photoUri ? (
+            <Image source={{ uri: codexEntry.photoUri }} style={styles.preview} />
+          ) : (
+            <View style={[styles.preview, { backgroundColor: '#0f2a30' }]} />
+          )}
+        </View>
+
+        <View style={styles.resultPanel}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+            <Text style={styles.codexTag}>CODEX ENTRY</Text>
+            <Text style={styles.species}>{codexEntry.commonName}</Text>
+            <Text style={styles.latin}>{codexEntry.scientificName}</Text>
+
+            {safety && catStyle && (
+              <View style={[
+                styles.safetyBadge,
+                { borderColor: catStyle.color, backgroundColor: catStyle.color + '15' },
+              ]}>
+                <Text style={[styles.safetyIcon, { color: catStyle.color }]}>
+                  {catStyle.icon}
+                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.safetyLabel, { color: catStyle.color }]}>
+                    {catStyle.label}
+                  </Text>
+                  <Text style={styles.safetySummary}>{safety.summary}</Text>
+                </View>
+              </View>
+            )}
+
+            {safety && safety.uses.length > 0 && (
+              <View style={styles.infoCard}>
+                <Text style={styles.cardTitle}>USES</Text>
+                {safety.uses.map((use, i) => (
+                  <Text key={i} style={styles.cardText}>• {use}</Text>
+                ))}
+              </View>
+            )}
+
+            {safety && safety.warnings.length > 0 && (
+              <View style={[styles.infoCard, { borderLeftColor: '#ffb454' }]}>
+                <Text style={[styles.cardTitle, { color: '#ffb454' }]}>WARNINGS</Text>
+                {safety.warnings.map((warn, i) => (
+                  <Text key={i} style={styles.cardText}>• {warn}</Text>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.infoCard}>
+              <Text style={styles.cardTitle}>TAXONOMY</Text>
+              <Text style={styles.cardText}>Family: {codexEntry.family}</Text>
+              <Text style={styles.cardText}>Genus: {codexEntry.genus}</Text>
+            </View>
+
+            <Text style={styles.scannedAt}>
+              Scanned: {new Date(codexEntry.scannedAt).toLocaleDateString()}
+            </Text>
+
+            <TouchableOpacity style={styles.btn} onPress={reset}>
+              <Text style={styles.btnText}>Back to scanner</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+
+        {/* Nav bar */}
+        <View style={styles.navBar}>
+          <TouchableOpacity style={styles.navBtn} onPress={reset}>
+            <Text style={styles.navIcon}>◎</Text>
+            <Text style={styles.navLabel}>SCAN</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navBtn} onPress={() => { reset(); setScreen('codex'); }}>
+            <Text style={[styles.navIcon, { color: '#f3c46a' }]}>☰</Text>
+            <Text style={[styles.navLabel, { color: '#f3c46a' }]}>CODEX</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ========== RESULT SCREEN ==========
   if (photo) {
     return (
       <View style={styles.container}>
@@ -140,7 +255,7 @@ export default function App() {
         </View>
 
         <View style={styles.resultPanel}>
-          <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
             {scanning && (
               <View style={styles.scanningBox}>
                 <ActivityIndicator size="large" color="#4fe5d4" />
@@ -245,22 +360,29 @@ export default function App() {
           </ScrollView>
         </View>
 
-        {/* Hidden share card — rendered off-screen for capture */}
+        {/* Hidden share card */}
         {result && safety && (
           <View style={styles.offscreen}>
-            <ShareCard
-              ref={shareRef}
-              photo={photo}
-              result={result}
-              safety={safety}
-            />
+            <ShareCard ref={shareRef} photo={photo} result={result} safety={safety} />
           </View>
         )}
+
+        {/* Nav bar */}
+        <View style={styles.navBar}>
+          <TouchableOpacity style={styles.navBtn} onPress={reset}>
+            <Text style={[styles.navIcon, { color: '#4fe5d4' }]}>◎</Text>
+            <Text style={[styles.navLabel, { color: '#4fe5d4' }]}>SCAN</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navBtn} onPress={() => { reset(); setScreen('codex'); }}>
+            <Text style={styles.navIcon}>☰</Text>
+            <Text style={styles.navLabel}>CODEX</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
-  // Camera viewfinder
+  // ========== CAMERA VIEWFINDER ==========
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={styles.camera} facing="back" />
@@ -276,6 +398,18 @@ export default function App() {
       <TouchableOpacity style={styles.captureBtn} onPress={takePhoto}>
         <View style={styles.captureBtnInner} />
       </TouchableOpacity>
+
+      {/* Nav bar */}
+      <View style={styles.navBar}>
+        <TouchableOpacity style={styles.navBtn}>
+          <Text style={[styles.navIcon, { color: '#4fe5d4' }]}>◎</Text>
+          <Text style={[styles.navLabel, { color: '#4fe5d4' }]}>SCAN</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navBtn} onPress={() => setScreen('codex')}>
+          <Text style={styles.navIcon}>☰</Text>
+          <Text style={styles.navLabel}>CODEX</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -314,7 +448,7 @@ const styles = StyleSheet.create({
   bl: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0 },
   br: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0 },
   captureBtn: {
-    position: 'absolute', bottom: 60, alignSelf: 'center',
+    position: 'absolute', bottom: 100, alignSelf: 'center',
     width: 76, height: 76, borderRadius: 38,
     backgroundColor: '#4fe5d4', alignItems: 'center', justifyContent: 'center',
     borderWidth: 3, borderColor: 'rgba(232, 255, 251, 0.85)',
@@ -322,7 +456,7 @@ const styles = StyleSheet.create({
   captureBtnInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#2cb5a7' },
 
   resultPanel: {
-    position: 'absolute', top: '40%', left: 0, right: 0, bottom: 0,
+    position: 'absolute', top: '40%', left: 0, right: 0, bottom: 56,
     backgroundColor: 'rgba(10, 26, 31, 0.97)', padding: 22,
     borderTopWidth: 1, borderColor: 'rgba(79, 229, 212, 0.45)',
   },
@@ -386,8 +520,26 @@ const styles = StyleSheet.create({
     color: '#f3c46a', fontWeight: '700', letterSpacing: 2, fontSize: 12,
   },
 
-  offscreen: {
-    position: 'absolute',
-    top: -9999, left: -9999,
+  scannedAt: {
+    color: '#8fb4b0', fontSize: 11, textAlign: 'center',
+    marginTop: 12, marginBottom: 8, letterSpacing: 1,
+  },
+
+  offscreen: { position: 'absolute', top: -9999, left: -9999 },
+
+  navBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    height: 56, flexDirection: 'row',
+    backgroundColor: 'rgba(6, 18, 22, 0.95)',
+    borderTopWidth: 1, borderTopColor: 'rgba(79, 229, 212, 0.2)',
+  },
+  navBtn: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+  },
+  navIcon: {
+    color: '#8fb4b0', fontSize: 20, marginBottom: 2,
+  },
+  navLabel: {
+    color: '#8fb4b0', fontSize: 8, letterSpacing: 2, fontWeight: '600',
   },
 });
