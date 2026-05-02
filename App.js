@@ -8,8 +8,10 @@ import * as Sharing from 'expo-sharing';
 import { identifyPlant } from './plantNet';
 import { getSafetyInfo, getCategoryStyle } from './plantSafety';
 import { saveScan } from './database';
+import { detectDisease, getSeverityStyle } from './diseaseDetect';
 import ShareCard from './ShareCard';
 import CodexScreen from './CodexScreen';
+import HealthScreen from './HealthScreen';
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -18,8 +20,8 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [sharing, setSharing] = useState(false);
-  const [screen, setScreen] = useState('scanner'); // 'scanner' or 'codex'
-  const [codexEntry, setCodexEntry] = useState(null); // viewing a saved entry
+  const [screen, setScreen] = useState('scanner');
+  const [codexEntry, setCodexEntry] = useState(null);
   const cameraRef = useRef(null);
   const shareRef = useRef(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
@@ -67,6 +69,11 @@ export default function App() {
     setCodexEntry(null);
   };
 
+  const switchScreen = (name) => {
+    reset();
+    setScreen(name);
+  };
+
   const takePhoto = async () => {
     if (!cameraRef.current) return;
     try {
@@ -82,7 +89,6 @@ export default function App() {
       ]);
       setResult(identified);
 
-      // Auto-save to codex
       const safety = getSafetyInfo(identified.scientificName) || {
         category: 'unknown', summary: '', uses: [], warnings: [],
       };
@@ -125,7 +131,7 @@ export default function App() {
     setScreen('scanner');
   };
 
-  // Compute safety
+  // Compute safety for current result or codex entry
   const activeResult = codexEntry || result;
   const safety = activeResult
     ? getSafetyInfo(activeResult.scientificName) || {
@@ -137,11 +143,34 @@ export default function App() {
     : null;
   const catStyle = safety ? getCategoryStyle(safety.category) : null;
 
+  // Shared nav bar component
+  const renderNavBar = () => (
+    <View style={styles.navBar}>
+      <TouchableOpacity style={styles.navBtn} onPress={() => switchScreen('scanner')}>
+        <Text style={[styles.navIcon, screen === 'scanner' && { color: '#4fe5d4' }]}>◎</Text>
+        <Text style={[styles.navLabel, screen === 'scanner' && { color: '#4fe5d4' }]}>SCAN</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.navBtn} onPress={() => switchScreen('health')}>
+        <Text style={[styles.navIcon, screen === 'health' && { color: '#ffb454' }]}>✚</Text>
+        <Text style={[styles.navLabel, screen === 'health' && { color: '#ffb454' }]}>HEALTH</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.navBtn} onPress={() => switchScreen('codex')}>
+        <Text style={[styles.navIcon, screen === 'codex' && { color: '#f3c46a' }]}>☰</Text>
+        <Text style={[styles.navLabel, screen === 'codex' && { color: '#f3c46a' }]}>CODEX</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // ========== HEALTH SCREEN ==========
+  if (screen === 'health') {
+    return <HealthScreen onBack={() => switchScreen('scanner')} />;
+  }
+
   // ========== CODEX SCREEN ==========
   if (screen === 'codex') {
     return (
       <CodexScreen
-        onBack={() => { reset(); setScreen('scanner'); }}
+        onBack={() => switchScreen('scanner')}
         onViewEntry={handleViewEntry}
       />
     );
@@ -160,7 +189,7 @@ export default function App() {
         </View>
 
         <View style={styles.resultPanel}>
-          <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
             <Text style={styles.codexTag}>CODEX ENTRY</Text>
             <Text style={styles.species}>{codexEntry.commonName}</Text>
             <Text style={styles.latin}>{codexEntry.scientificName}</Text>
@@ -179,6 +208,14 @@ export default function App() {
                   </Text>
                   <Text style={styles.safetySummary}>{safety.summary}</Text>
                 </View>
+              </View>
+            )}
+
+            {safety && safety.category === 'toxic' && (
+              <View style={styles.dangerBanner}>
+                <Text style={styles.dangerText}>
+                  ⚠ DO NOT CONSUME — KEEP AWAY FROM CHILDREN AND PETS
+                </Text>
               </View>
             )}
 
@@ -216,17 +253,7 @@ export default function App() {
           </ScrollView>
         </View>
 
-        {/* Nav bar */}
-        <View style={styles.navBar}>
-          <TouchableOpacity style={styles.navBtn} onPress={reset}>
-            <Text style={styles.navIcon}>◎</Text>
-            <Text style={styles.navLabel}>SCAN</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navBtn} onPress={() => { reset(); setScreen('codex'); }}>
-            <Text style={[styles.navIcon, { color: '#f3c46a' }]}>☰</Text>
-            <Text style={[styles.navLabel, { color: '#f3c46a' }]}>CODEX</Text>
-          </TouchableOpacity>
-        </View>
+        {renderNavBar()}
       </View>
     );
   }
@@ -367,17 +394,7 @@ export default function App() {
           </View>
         )}
 
-        {/* Nav bar */}
-        <View style={styles.navBar}>
-          <TouchableOpacity style={styles.navBtn} onPress={reset}>
-            <Text style={[styles.navIcon, { color: '#4fe5d4' }]}>◎</Text>
-            <Text style={[styles.navLabel, { color: '#4fe5d4' }]}>SCAN</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navBtn} onPress={() => { reset(); setScreen('codex'); }}>
-            <Text style={styles.navIcon}>☰</Text>
-            <Text style={styles.navLabel}>CODEX</Text>
-          </TouchableOpacity>
-        </View>
+        {renderNavBar()}
       </View>
     );
   }
@@ -399,17 +416,7 @@ export default function App() {
         <View style={styles.captureBtnInner} />
       </TouchableOpacity>
 
-      {/* Nav bar */}
-      <View style={styles.navBar}>
-        <TouchableOpacity style={styles.navBtn}>
-          <Text style={[styles.navIcon, { color: '#4fe5d4' }]}>◎</Text>
-          <Text style={[styles.navLabel, { color: '#4fe5d4' }]}>SCAN</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navBtn} onPress={() => setScreen('codex')}>
-          <Text style={styles.navIcon}>☰</Text>
-          <Text style={styles.navLabel}>CODEX</Text>
-        </TouchableOpacity>
-      </View>
+      {renderNavBar()}
     </View>
   );
 }
@@ -533,13 +540,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(6, 18, 22, 0.95)',
     borderTopWidth: 1, borderTopColor: 'rgba(79, 229, 212, 0.2)',
   },
-  navBtn: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-  },
-  navIcon: {
-    color: '#8fb4b0', fontSize: 20, marginBottom: 2,
-  },
-  navLabel: {
-    color: '#8fb4b0', fontSize: 8, letterSpacing: 2, fontWeight: '600',
-  },
+  navBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  navIcon: { color: '#8fb4b0', fontSize: 20, marginBottom: 2 },
+  navLabel: { color: '#8fb4b0', fontSize: 8, letterSpacing: 2, fontWeight: '600' },
 });
