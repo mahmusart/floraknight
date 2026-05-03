@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d2228"/>
+      <stop offset="100%" stop-color="#061418"/>
+    </linearGradient>
+    <linearGradient id="helmet" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#5a8a8f"/>
+      <stop offset="40%" stop-color="#3d6266"/>
+      <stop offset="100%" stop-color="#2a4548"/>
+    </linearGradient>
+    <linearGradient id="helmetDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4a7a7f"/>
+      <stop offset="100%" stop-color="#1e3538"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4fe5d4" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#2a9a8f" stop-opacity="0.7"/>
+    </linearGradient>
+    <linearGradient id="leaf1" x1="0" y1="1" x2="0.5" y2="0">
+      <stop offset="0%" stop-color="#3d8859"/>
+      <stop offset="60%" stop-color="#6cd9a3"/>
+      <stop offset="100%" stop-color="#8aebc0"/>
+    </linearGradient>
+    <linearGradient id="leaf2" x1="0" y1="1" x2="0.3" y2="0">
+      <stop offset="0%" stop-color="#2d6840"/>
+      <stop offset="60%" stop-color="#5bc48e"/>
+      <stop offset="100%" stop-color="#7addb0"/>
+    </linearGradient>
+    <linearGradient id="leaf3" x1="0.5" y1="1" x2="0.5" y2="0">
+      <stop offset="0%" stop-color="#1a5030"/>
+      <stop offset="50%" stop-color="#4aaa75"/>
+      <stop offset="100%" stop-color="#6cd9a3"/>
+    </linearGradient>
+    <linearGradient id="goldAccent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f3c46a"/>
+      <stop offset="100%" stop-color="#d4a24a"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="0.5" cy="0.4" r="0.45">
+      <stop offset="0%" stop-color="#4fe5d4" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#4fe5d4" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="224" fill="url(#bgGlow)"/>
+  <rect x="4" y="4" width="1016" height="1016" rx="220" fill="none" stroke="#4fe5d4" stroke-opacity="0.12" stroke-width="2"/>
+
+  <!-- Back herbs -->
+  <path d="M512 380 C512 290, 540 190, 558 100 C564 70, 548 45, 528 20 C520 80, 508 200, 512 380Z" fill="url(#leaf3)" opacity="0.6"/>
+  <path d="M512 380 C512 290, 484 190, 466 100 C460 70, 476 45, 496 20 C504 80, 516 200, 512 380Z" fill="url(#leaf2)" opacity="0.5"/>
+  <path d="M585 420 C615 340, 690 250, 760 155 C742 185, 705 270, 665 325 C645 355, 605 400, 585 420Z" fill="url(#leaf1)" opacity="0.5"/>
+  <path d="M439 420 C409 340, 334 250, 264 155 C282 185, 319 270, 359 325 C379 355, 419 400, 439 420Z" fill="url(#leaf2)" opacity="0.5"/>
+
+  <!-- Helmet dome -->
+  <path d="M260 620
+           C260 420, 355 345, 512 345
+           C669 345, 764 420, 764 620
+           L764 700
+           C764 728, 746 740, 720 740
+           L304 740
+           C278 740, 260 728, 260 700 Z"
+        fill="url(#helmet)" stroke="#4fe5d4" stroke-width="3" stroke-opacity="0.25"/>
+
+  <!-- Center ridge -->
+  <path d="M512 345 C512 345, 524 440, 524 530 L524 620 L500 620 L500 530 C500 440, 512 345, 512 345Z"
+        fill="#5a9a9f" opacity="0.35"/>
+
+  <!-- Panel lines -->
+  <path d="M360 435 C385 555, 360 625, 335 700" fill="none" stroke="#4fe5d4" stroke-width="2" stroke-opacity="0.1"/>
+  <path d="M664 435 C639 555, 664 625, 689 700" fill="none" stroke="#4fe5d4" stroke-width="2" stroke-opacity="0.1"/>
+
+  <!-- Face plate -->
+  <path d="M328 600 L696 600 L696 700 C696 715, 678 726, 652 726 L372 726 C346 726, 328 715, 328 700Z"
+        fill="url(#helmetDark)" stroke="#4fe5d4" stroke-width="2" stroke-opacity="0.18"/>
+
+  <!-- Visor -->
+  <path d="M365 628 L659 628 L652 670 L372 670Z" fill="url(#visor)" opacity="0.85"/>
+  <path d="M365 628 L659 628 L652 670 L372 670Z" fill="#4fe5d4" opacity="0.1"/>
+  <line x1="374" y1="645" x2="650" y2="645" stroke="#0a1a1f" stroke-width="4" stroke-opacity="0.3"/>
+  <line x1="360" y1="636" x2="664" y2="636" stroke="#2a4548" stroke-width="3"/>
+  <line x1="363" y1="658" x2="661" y2="658" stroke="#2a4548" stroke-width="3"/>
+
+  <!-- Chin -->
+  <path d="M372 726 C395 780, 445 802, 512 802 C579 802, 629 780, 652 726"
+        fill="url(#helmetDark)" stroke="#4fe5d4" stroke-width="1.5" stroke-opacity="0.12"/>
+
+  <!-- Gold brow -->
+  <path d="M338 605 L686 605" stroke="url(#goldAccent)" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="352" cy="605" r="9" fill="url(#goldAccent)"/>
+  <circle cx="672" cy="605" r="9" fill="url(#goldAccent)"/>
+  <circle cx="512" cy="605" r="9" fill="url(#goldAccent)"/>
+
+  <!-- Gold nose guard -->
+  <path d="M506 608 L512 726 L518 608" fill="none" stroke="url(#goldAccent)" stroke-width="4.5"/>
+
+  <!-- Front herbs -->
+  <path d="M600 395 C630 335, 685 275, 725 190 C710 230, 680 300, 650 345 C635 370, 610 390, 600 395Z" fill="url(#leaf1)"/>
+  <path d="M600 395 C630 335, 680 270, 720 195" fill="none" stroke="#3d6840" stroke-width="2" opacity="0.4"/>
+  <path d="M628 365 C655 325, 695 290, 730 245 C715 275, 680 315, 652 342 C640 356, 633 363, 628 365Z" fill="url(#leaf2)" opacity="0.8"/>
+
+  <path d="M424 395 C394 335, 339 275, 299 190 C314 230, 344 300, 374 345 C389 370, 414 390, 424 395Z" fill="url(#leaf1)"/>
+  <path d="M424 395 C394 335, 344 270, 304 195" fill="none" stroke="#3d6840" stroke-width="2" opacity="0.4"/>
+  <path d="M396 365 C369 325, 329 290, 294 245 C309 275, 344 315, 372 342 C384 356, 391 363, 396 365Z" fill="url(#leaf2)" opacity="0.8"/>
+
+  <!-- Center sprouts -->
+  <path d="M512 370 C517 325, 542 280, 556 235 C548 270, 528 320, 512 370Z" fill="url(#leaf1)" opacity="0.9"/>
+  <path d="M512 370 C507 325, 482 280, 468 235 C476 270, 496 320, 512 370Z" fill="url(#leaf2)" opacity="0.9"/>
+
+  <!-- Top buds -->
+  <ellipse cx="550" cy="225" rx="12" ry="22" transform="rotate(25 550 225)" fill="url(#leaf1)" opacity="0.85"/>
+  <ellipse cx="474" cy="225" rx="12" ry="22" transform="rotate(-25 474 225)" fill="url(#leaf2)" opacity="0.85"/>
+  <ellipse cx="512" cy="210" rx="10" ry="20" fill="url(#leaf3)" opacity="0.9"/>
+
+  <!-- Trailing vines -->
+  <path d="M725 190 C742 150, 770 125, 794 95" fill="none" stroke="#5bc48e" stroke-width="2.5" opacity="0.45"/>
+  <ellipse cx="797" cy="92" rx="9" ry="15" transform="rotate(30 797 92)" fill="url(#leaf1)" opacity="0.6"/>
+  <path d="M299 190 C282 150, 254 125, 230 95" fill="none" stroke="#5bc48e" stroke-width="2.5" opacity="0.45"/>
+  <ellipse cx="227" cy="92" rx="9" ry="15" transform="rotate(-30 227 92)" fill="url(#leaf2)" opacity="0.6"/>
+
+  <!-- Flower accents -->
+  <circle cx="564" cy="215" r="6" fill="#f3c46a" opacity="0.85"/>
+  <circle cx="564" cy="215" r="3" fill="#fff" opacity="0.5"/>
+  <circle cx="462" cy="228" r="5" fill="#f3c46a" opacity="0.6"/>
+  <circle cx="462" cy="228" r="2.5" fill="#fff" opacity="0.4"/>
+
+  <!-- Tiny gold sparkle near top -->
+  <circle cx="520" cy="195" r="2.5" fill="#f3c46a" opacity="0.4"/>
+</svg>
