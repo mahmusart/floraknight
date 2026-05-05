@@ -1,17 +1,21 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, Image,
   ActivityIndicator, ScrollView, Animated, Easing,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Sharing from 'expo-sharing';
+import * as SplashScreen from 'expo-splash-screen';
 import { identifyPlant } from './plantNet';
 import { getSafetyInfo, getCategoryStyle } from './plantSafety';
 import { saveScan } from './database';
 import { detectDisease, getSeverityStyle } from './diseaseDetect';
+import { narrateScan, stopNarration } from './narrator';
 import ShareCard from './ShareCard';
 import CodexScreen from './CodexScreen';
 import HealthScreen from './HealthScreen';
+
+SplashScreen.preventAutoHideAsync();
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -20,11 +24,26 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [sharing, setSharing] = useState(false);
+  const [narrating, setNarrating] = useState(false);
   const [screen, setScreen] = useState('scanner');
   const [codexEntry, setCodexEntry] = useState(null);
+  const [appReady, setAppReady] = useState(false);
   const cameraRef = useRef(null);
   const shareRef = useRef(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    async function prepare() {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      setAppReady(true);
+      await SplashScreen.hideAsync();
+    }
+    prepare();
+  }, []);
+
+  if (!appReady) {
+    return null;
+  }
 
   if (!permission) return <View style={styles.container} />;
 
@@ -61,11 +80,13 @@ export default function App() {
   };
 
   const reset = () => {
+    stopNarration();
     setPhoto(null);
     setResult(null);
     setError(null);
     setScanning(false);
     setSharing(false);
+    setNarrating(false);
     setCodexEntry(null);
   };
 
@@ -126,12 +147,29 @@ export default function App() {
     }
   };
 
+  const handleNarrate = async () => {
+    const activeData = codexEntry || result;
+    if (!activeData || !safety) return;
+
+    if (narrating) {
+      await stopNarration();
+      setNarrating(false);
+      return;
+    }
+
+    setNarrating(true);
+    await narrateScan(activeData, safety, {
+      onDone: () => setNarrating(false),
+      onStopped: () => setNarrating(false),
+      onError: () => setNarrating(false),
+    });
+  };
+
   const handleViewEntry = (entry) => {
     setCodexEntry(entry);
     setScreen('scanner');
   };
 
-  // Compute safety for current result or codex entry
   const activeResult = codexEntry || result;
   const safety = activeResult
     ? getSafetyInfo(activeResult.scientificName) || {
@@ -143,7 +181,6 @@ export default function App() {
     : null;
   const catStyle = safety ? getCategoryStyle(safety.category) : null;
 
-  // Shared nav bar component
   const renderNavBar = () => (
     <View style={styles.navBar}>
       <TouchableOpacity style={styles.navBtn} onPress={() => switchScreen('scanner')}>
@@ -161,12 +198,10 @@ export default function App() {
     </View>
   );
 
-  // ========== HEALTH SCREEN ==========
   if (screen === 'health') {
     return <HealthScreen onBack={() => switchScreen('scanner')} />;
   }
 
-  // ========== CODEX SCREEN ==========
   if (screen === 'codex') {
     return (
       <CodexScreen
@@ -176,7 +211,6 @@ export default function App() {
     );
   }
 
-  // ========== CODEX ENTRY VIEW ==========
   if (codexEntry) {
     return (
       <View style={styles.container}>
@@ -247,6 +281,15 @@ export default function App() {
               Scanned: {new Date(codexEntry.scannedAt).toLocaleDateString()}
             </Text>
 
+            <TouchableOpacity
+              style={styles.narrateBtn}
+              onPress={handleNarrate}
+            >
+              <Text style={styles.narrateBtnText}>
+                {narrating ? '◼ STOP NARRATION' : '▶ NARRATE WITH SPROUT'}
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.btn} onPress={reset}>
               <Text style={styles.btnText}>Back to scanner</Text>
             </TouchableOpacity>
@@ -258,7 +301,6 @@ export default function App() {
     );
   }
 
-  // ========== RESULT SCREEN ==========
   if (photo) {
     return (
       <View style={styles.container}>
@@ -370,6 +412,15 @@ export default function App() {
                 )}
 
                 <TouchableOpacity
+                  style={styles.narrateBtn}
+                  onPress={handleNarrate}
+                >
+                  <Text style={styles.narrateBtnText}>
+                    {narrating ? '◼ STOP NARRATION' : '▶ NARRATE WITH SPROUT'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={styles.shareBtn}
                   onPress={handleShare}
                   disabled={sharing}
@@ -387,7 +438,6 @@ export default function App() {
           </ScrollView>
         </View>
 
-        {/* Hidden share card */}
         {result && safety && (
           <View style={styles.offscreen}>
             <ShareCard ref={shareRef} photo={photo} result={result} safety={safety} />
@@ -399,7 +449,6 @@ export default function App() {
     );
   }
 
-  // ========== CAMERA VIEWFINDER ==========
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={styles.camera} facing="back" />
@@ -461,7 +510,6 @@ const styles = StyleSheet.create({
     borderWidth: 3, borderColor: 'rgba(232, 255, 251, 0.85)',
   },
   captureBtnInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#2cb5a7' },
-
   resultPanel: {
     position: 'absolute', top: '40%', left: 0, right: 0, bottom: 56,
     backgroundColor: 'rgba(10, 26, 31, 0.97)', padding: 22,
@@ -479,7 +527,6 @@ const styles = StyleSheet.create({
   codexTag: { color: '#f3c46a', fontSize: 10, letterSpacing: 2, marginBottom: 6 },
   species: { color: '#e8fffb', fontSize: 24, fontWeight: '600', marginBottom: 4 },
   latin: { color: '#4fe5d4', fontSize: 13, fontStyle: 'italic', marginBottom: 18 },
-
   safetyBadge: {
     flexDirection: 'row', alignItems: 'center',
     borderWidth: 1.5, borderRadius: 6,
@@ -495,7 +542,6 @@ const styles = StyleSheet.create({
     color: '#0a1a1f', fontSize: 11, fontWeight: '700',
     letterSpacing: 1.5, textAlign: 'center',
   },
-
   confidenceBox: {
     backgroundColor: 'rgba(15, 42, 48, 0.78)', padding: 12, borderRadius: 4,
     borderWidth: 1, borderColor: 'rgba(79, 229, 212, 0.25)', marginBottom: 12,
@@ -516,7 +562,6 @@ const styles = StyleSheet.create({
     borderRadius: 6, marginTop: 8, alignSelf: 'center',
   },
   btnText: { color: '#0a1a1f', fontWeight: '700', letterSpacing: 2, fontSize: 12 },
-
   shareBtn: {
     backgroundColor: 'rgba(243, 196, 106, 0.15)',
     borderWidth: 1, borderColor: '#f3c46a',
@@ -526,14 +571,20 @@ const styles = StyleSheet.create({
   shareBtnText: {
     color: '#f3c46a', fontWeight: '700', letterSpacing: 2, fontSize: 12,
   },
-
+  narrateBtn: {
+    backgroundColor: 'rgba(108, 217, 163, 0.15)',
+    borderWidth: 1, borderColor: '#6cd9a3',
+    paddingHorizontal: 28, paddingVertical: 14,
+    borderRadius: 6, marginTop: 4, marginBottom: 4, alignSelf: 'center',
+  },
+  narrateBtnText: {
+    color: '#6cd9a3', fontWeight: '700', letterSpacing: 2, fontSize: 12,
+  },
   scannedAt: {
     color: '#8fb4b0', fontSize: 11, textAlign: 'center',
     marginTop: 12, marginBottom: 8, letterSpacing: 1,
   },
-
   offscreen: { position: 'absolute', top: -9999, left: -9999 },
-
   navBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     height: 56, flexDirection: 'row',
