@@ -11,6 +11,7 @@ import { getSafetyInfo, getCategoryStyle } from './plantSafety';
 import { saveScan } from './database';
 import { detectDisease, getSeverityStyle } from './diseaseDetect';
 import { narrateScan, stopNarration } from './narrator';
+import { identifyAndJoke } from './notAPlant';
 import ShareCard from './ShareCard';
 import CodexScreen from './CodexScreen';
 import HealthScreen from './HealthScreen';
@@ -97,15 +98,17 @@ export default function App() {
 
   const takePhoto = async () => {
     if (!cameraRef.current) return;
+    let capturedUri = null;
     try {
       const captured = await cameraRef.current.takePictureAsync({ quality: 0.7 });
-      setPhoto(captured.uri);
+      capturedUri = captured.uri;
+      setPhoto(capturedUri);
       setScanning(true);
       setError(null);
       startScanAnimation();
 
       const [identified] = await Promise.all([
-        identifyPlant(captured.uri),
+        identifyPlant(capturedUri),
         new Promise(resolve => setTimeout(resolve, 1200)),
       ]);
       setResult(identified);
@@ -114,13 +117,22 @@ export default function App() {
         category: 'unknown', summary: '', uses: [], warnings: [],
       };
       try {
-        await saveScan(identified, safety, captured.uri);
+        await saveScan(identified, safety, capturedUri);
       } catch (saveErr) {
         console.log('Save to codex failed:', saveErr);
       }
     } catch (e) {
       await new Promise(resolve => setTimeout(resolve, 800));
-      setError(e.message);
+      if (capturedUri) {
+        try {
+          const jokeResult = await identifyAndJoke(capturedUri);
+          setError(`NOT A PLANT: ${jokeResult.objectName.toUpperCase()}\n\n${jokeResult.joke}`);
+        } catch (jokeErr) {
+          setError(e.message);
+        }
+      } else {
+        setError(e.message);
+      }
     } finally {
       setScanning(false);
     }
@@ -333,9 +345,22 @@ export default function App() {
             )}
 
             {error && (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorTitle}>SCAN FAILED</Text>
-                <Text style={styles.errorMsg}>{error}</Text>
+              <View style={error.startsWith('NOT A PLANT')
+                ? styles.jokeBox
+                : styles.errorBox
+              }>
+                <Text style={error.startsWith('NOT A PLANT')
+                  ? styles.jokeTitle
+                  : styles.errorTitle
+                }>
+                  {error.startsWith('NOT A PLANT') ? '🌿 SPROUT SAYS...' : 'SCAN FAILED'}
+                </Text>
+                <Text style={error.startsWith('NOT A PLANT')
+                  ? styles.jokeMsg
+                  : styles.errorMsg
+                }>
+                  {error.startsWith('NOT A PLANT') ? error.replace('NOT A PLANT: ', '') : error}
+                </Text>
               </View>
             )}
 
@@ -524,6 +549,17 @@ const styles = StyleSheet.create({
   },
   errorTitle: { color: '#ff7b8a', fontSize: 11, letterSpacing: 2, marginBottom: 6, fontWeight: '600' },
   errorMsg: { color: '#e8fffb', fontSize: 13, lineHeight: 18 },
+  jokeBox: {
+    backgroundColor: 'rgba(108, 217, 163, 0.1)',
+    borderLeftWidth: 2, borderLeftColor: '#6cd9a3',
+    padding: 14, marginBottom: 16, borderRadius: 4,
+  },
+  jokeTitle: {
+    color: '#6cd9a3', fontSize: 11, letterSpacing: 2, marginBottom: 8, fontWeight: '600',
+  },
+  jokeMsg: {
+    color: '#e8fffb', fontSize: 14, lineHeight: 22,
+  },
   codexTag: { color: '#f3c46a', fontSize: 10, letterSpacing: 2, marginBottom: 6 },
   species: { color: '#e8fffb', fontSize: 24, fontWeight: '600', marginBottom: 4 },
   latin: { color: '#4fe5d4', fontSize: 13, fontStyle: 'italic', marginBottom: 18 },
