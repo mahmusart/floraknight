@@ -25,12 +25,21 @@
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a1a1f"
       },
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       "expo-camera",
       "expo-sqlite",
       "expo-splash-screen"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "755717a2-dd43-4362-8d11-25ccd4525e65"
+      }
+    }
   }
 }

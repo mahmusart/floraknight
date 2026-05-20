@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import * as FileSystem from 'expo-file-system';
 
 let db = null;
 
@@ -23,21 +24,37 @@ export async function getDatabase() {
   return db;
 }
 
+async function persistPhoto(tempUri) {
+  const filename = `fk_${Date.now()}.jpg`;
+  const permanentUri = FileSystem.documentDirectory + 'photos/' + filename;
+  await FileSystem.makeDirectoryAsync(
+    FileSystem.documentDirectory + 'photos',
+    { intermediates: true }
+  );
+  await FileSystem.copyAsync({ from: tempUri, to: permanentUri });
+  return permanentUri;
+}
+
 export async function saveScan(result, safety, photoUri) {
   const database = await getDatabase();
 
-  // Check if we already have this species — avoid duplicates
+  let permanentUri = photoUri;
+  try {
+    permanentUri = await persistPhoto(photoUri);
+  } catch (e) {
+    console.log('Photo persist failed, using temp URI:', e);
+  }
+
   const existing = await database.getFirstAsync(
     'SELECT id FROM scans WHERE scientificName = ?',
     [result.scientificName]
   );
 
   if (existing) {
-    // Update with newer photo and confidence
     await database.runAsync(
       `UPDATE scans SET confidence = ?, photoUri = ?, safetyCategory = ?,
        scannedAt = datetime('now') WHERE scientificName = ?`,
-      [result.confidence, photoUri, safety.category, result.scientificName]
+      [result.confidence, permanentUri, safety.category, result.scientificName]
     );
     return existing.id;
   }
@@ -52,11 +69,35 @@ export async function saveScan(result, safety, photoUri) {
       result.genus,
       result.confidence,
       safety.category,
-      photoUri,
+      permanentUri,
     ]
   );
 
   return insertResult.lastInsertRowId;
+}
+
+export async function deleteScan(id, photoUri) {
+  const database = await getDatabase();
+
+  // Delete the photo file from permanent storage
+  if (photoUri) {
+    try {
+      const fileInfo = await FileSystem.getInfoAsync(photoUri);
+      if (fileInfo.exists) {
+        await FileSystem.deleteAsync(photoUri, { idempotent: true });
+      }
+    } catch (e) {
+      console.log('Photo file delete failed:', e);
+    }
+  }
+
+  await database.runAsync('DELETE FROM scans WHERE id = ?', [id]);
+}
+
+export async function deleteMultipleScans(scans) {
+  for (const scan of scans) {
+    await deleteScan(scan.id, scan.photoUri);
+  }
 }
 
 export async function getAllScans() {

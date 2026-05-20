@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, Image,
-  ScrollView, ActivityIndicator,
+  ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
-import { getAllScans, getStats } from './database';
+import { getAllScans, getStats, deleteMultipleScans } from './database';
 import { getCategoryStyle } from './plantSafety';
 
-export default function CodexScreen({ onBack, onViewEntry }) {
+export default function CodexScreen({ onBack, onViewEntry, renderNavBar }) {
   const [scans, setScans] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [editMode, setEditMode] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -30,6 +32,55 @@ export default function CodexScreen({ onBack, onViewEntry }) {
     }
   };
 
+  const handleLongPress = (scan) => {
+    setEditMode(true);
+    setSelectedIds(new Set([scan.id]));
+  };
+
+  const handlePress = (scan) => {
+    if (!editMode) {
+      onViewEntry(scan);
+      return;
+    }
+    // In edit mode — toggle selection
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(scan.id)) {
+        next.delete(scan.id);
+        if (next.size === 0) setEditMode(false);
+      } else {
+        next.add(scan.id);
+      }
+      return next;
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const handleDelete = () => {
+    const count = selectedIds.size;
+    Alert.alert(
+      'Delete entries',
+      `Remove ${count} ${count === 1 ? 'entry' : 'entries'} from your codex? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Delete ${count === 1 ? 'entry' : `${count} entries`}`,
+          style: 'destructive',
+          onPress: async () => {
+            const toDelete = scans.filter(s => selectedIds.has(s.id));
+            await deleteMultipleScans(toDelete);
+            cancelEdit();
+            loadData();
+          },
+        },
+      ]
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -42,16 +93,32 @@ export default function CodexScreen({ onBack, onViewEntry }) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-          <Text style={styles.backText}>← SCAN</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>FIELD CODEX</Text>
+        {editMode ? (
+          <TouchableOpacity style={styles.backBtn} onPress={cancelEdit}>
+            <Text style={styles.cancelText}>CANCEL</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <Text style={styles.backText}>← SCAN</Text>
+          </TouchableOpacity>
+        )}
+        <Text style={styles.headerTitle}>
+          {editMode ? `${selectedIds.size} SELECTED` : 'FIELD CODEX'}
+        </Text>
         <View style={{ width: 60 }} />
       </View>
 
+      {editMode && (
+        <View style={styles.editBanner}>
+          <Text style={styles.editBannerText}>
+            Long-press more entries to select
+          </Text>
+        </View>
+      )}
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Stats row */}
-        {stats && (
+        {stats && !editMode && (
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
               <Text style={styles.statNum}>{stats.total}</Text>
@@ -91,12 +158,18 @@ export default function CodexScreen({ onBack, onViewEntry }) {
           <View style={styles.grid}>
             {scans.map((scan) => {
               const catStyle = getCategoryStyle(scan.safetyCategory || 'unknown');
+              const isSelected = selectedIds.has(scan.id);
               return (
                 <TouchableOpacity
                   key={scan.id}
-                  style={styles.gridCell}
-                  onPress={() => onViewEntry(scan)}
+                  style={[
+                    styles.gridCell,
+                    isSelected && styles.gridCellSelected,
+                  ]}
+                  onPress={() => handlePress(scan)}
+                  onLongPress={() => handleLongPress(scan)}
                   activeOpacity={0.7}
+                  delayLongPress={400}
                 >
                   {scan.photoUri ? (
                     <Image source={{ uri: scan.photoUri }} style={styles.cellImage} />
@@ -104,8 +177,22 @@ export default function CodexScreen({ onBack, onViewEntry }) {
                     <View style={[styles.cellImage, { backgroundColor: '#0f2a30' }]} />
                   )}
 
+                  {/* Selection overlay */}
+                  {editMode && (
+                    <View style={[
+                      styles.selectionOverlay,
+                      isSelected && styles.selectionOverlayActive,
+                    ]}>
+                      {isSelected && (
+                        <Text style={styles.selectionCheck}>✕</Text>
+                      )}
+                    </View>
+                  )}
+
                   {/* Safety indicator dot */}
-                  <View style={[styles.safetyDot, { backgroundColor: catStyle.color }]} />
+                  {!editMode && (
+                    <View style={[styles.safetyDot, { backgroundColor: catStyle.color }]} />
+                  )}
 
                   {/* Category badge */}
                   <View style={[styles.cellBadge, { backgroundColor: catStyle.color + '30', borderColor: catStyle.color }]}>
@@ -136,13 +223,29 @@ export default function CodexScreen({ onBack, onViewEntry }) {
           </View>
         )}
 
-        {/* Footer count */}
-        {scans.length > 0 && (
+        {scans.length > 0 && !editMode && (
           <Text style={styles.footerCount}>
             {scans.length} {scans.length === 1 ? 'species' : 'species'} catalogued
           </Text>
         )}
+
+        {editMode && (
+          <Text style={styles.footerHint}>
+            Tap entries to select · Long-press to add more
+          </Text>
+        )}
       </ScrollView>
+
+      {/* Delete button — only visible in edit mode */}
+      {editMode && selectedIds.size > 0 && (
+        <TouchableOpacity style={styles.deleteBar} onPress={handleDelete}>
+          <Text style={styles.deleteBarText}>
+            ✕ DELETE {selectedIds.size} {selectedIds.size === 1 ? 'ENTRY' : 'ENTRIES'}
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {renderNavBar && renderNavBar()}
     </View>
   );
 }
@@ -150,7 +253,6 @@ export default function CodexScreen({ onBack, onViewEntry }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1, backgroundColor: '#0a1a1f',
-    justifyContent: 'center',
   },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -159,12 +261,19 @@ const styles = StyleSheet.create({
   },
   backBtn: { width: 60 },
   backText: { color: '#4fe5d4', fontSize: 12, letterSpacing: 1.5, fontWeight: '600' },
+  cancelText: { color: '#ff7b8a', fontSize: 12, letterSpacing: 1.5, fontWeight: '600' },
   headerTitle: {
     color: '#f3c46a', fontSize: 16, fontWeight: '700', letterSpacing: 3,
   },
-
-  scrollContent: { padding: 16, paddingBottom: 40 },
-
+  editBanner: {
+    backgroundColor: 'rgba(255, 123, 138, 0.08)',
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255, 123, 138, 0.2)',
+    paddingVertical: 8, alignItems: 'center',
+  },
+  editBannerText: {
+    color: '#ff7b8a', fontSize: 10, letterSpacing: 1.5,
+  },
+  scrollContent: { padding: 16, paddingBottom: 100 },
   statsRow: {
     flexDirection: 'row', gap: 8, marginBottom: 20,
   },
@@ -179,7 +288,6 @@ const styles = StyleSheet.create({
   statLabel: {
     color: '#8fb4b0', fontSize: 7, letterSpacing: 1.5, fontWeight: '500',
   },
-
   emptyState: {
     alignItems: 'center', paddingVertical: 60, paddingHorizontal: 24,
   },
@@ -196,7 +304,6 @@ const styles = StyleSheet.create({
   scanBtnText: {
     color: '#0a1a1f', fontWeight: '700', letterSpacing: 2, fontSize: 12,
   },
-
   grid: {
     flexDirection: 'row', flexWrap: 'wrap', gap: 10,
   },
@@ -207,8 +314,23 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(79, 229, 212, 0.2)',
     position: 'relative',
   },
+  gridCellSelected: {
+    borderColor: '#ff7b8a',
+    borderWidth: 2,
+  },
   cellImage: {
     width: '100%', height: '65%', resizeMode: 'cover',
+  },
+  selectionOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: '65%',
+    backgroundColor: 'transparent',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  selectionOverlayActive: {
+    backgroundColor: 'rgba(255, 123, 138, 0.45)',
+  },
+  selectionCheck: {
+    color: '#fff', fontSize: 28, fontWeight: '700',
   },
   safetyDot: {
     position: 'absolute', top: 8, right: 8,
@@ -241,9 +363,24 @@ const styles = StyleSheet.create({
   mcTr: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0 },
   mcBl: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0 },
   mcBr: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0 },
-
   footerCount: {
     color: '#8fb4b0', fontSize: 11, letterSpacing: 2,
     textAlign: 'center', marginTop: 20,
+  },
+  footerHint: {
+    color: '#8fb4b0', fontSize: 10, letterSpacing: 1.5,
+    textAlign: 'center', marginTop: 16,
+  },
+  deleteBar: {
+    position: 'absolute', bottom: 56, left: 16, right: 16,
+    backgroundColor: '#ff7b8a',
+    paddingVertical: 16, borderRadius: 6,
+    alignItems: 'center',
+    shadowColor: '#ff7b8a', shadowOpacity: 0.4,
+    shadowRadius: 12, shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
+  },
+  deleteBarText: {
+    color: '#0a1a1f', fontWeight: '700', letterSpacing: 2.5, fontSize: 12,
   },
 });

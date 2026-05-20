@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, Image,
-  ActivityIndicator, ScrollView, Animated, Easing,
+  ActivityIndicator, ScrollView, Animated, Easing, Modal, Alert,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Sharing from 'expo-sharing';
@@ -15,6 +15,13 @@ import { identifyAndJoke } from './notAPlant';
 import ShareCard from './ShareCard';
 import CodexScreen from './CodexScreen';
 import HealthScreen from './HealthScreen';
+import {
+  canScan,
+  incrementScanCount,
+  getScansRemaining,
+  resetScanLimit,
+  DAILY_SCAN_LIMIT,
+} from './scanLimits';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -29,18 +36,34 @@ export default function App() {
   const [screen, setScreen] = useState('scanner');
   const [codexEntry, setCodexEntry] = useState(null);
   const [appReady, setAppReady] = useState(false);
+
+  // Scan limit state
+  const [scansRemaining, setScansRemaining] = useState(DAILY_SCAN_LIMIT);
+  const [showPaywall, setShowPaywall] = useState(false);
+
   const cameraRef = useRef(null);
   const shareRef = useRef(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     async function prepare() {
+      // Load scan count while waiting for splash
+      await resetScanLimit(); // delete later before prod
+      const remaining = await getScansRemaining();
+      setScansRemaining(remaining);
       await new Promise(resolve => setTimeout(resolve, 2000));
       setAppReady(true);
       await SplashScreen.hideAsync();
     }
     prepare();
   }, []);
+
+  // Refresh scan count whenever the scanner screen comes into focus
+  useEffect(() => {
+    if (screen === 'scanner') {
+      getScansRemaining().then(setScansRemaining);
+    }
+  }, [screen]);
 
   if (!appReady) {
     return null;
@@ -98,6 +121,14 @@ export default function App() {
 
   const takePhoto = async () => {
     if (!cameraRef.current) return;
+
+    // --- SCAN LIMIT CHECK ---
+    const allowed = await canScan();
+    if (!allowed) {
+      setShowPaywall(true);
+      return;
+    }
+
     let capturedUri = null;
     try {
       const captured = await cameraRef.current.takePictureAsync({ quality: 0.7 });
@@ -113,6 +144,10 @@ export default function App() {
       ]);
       setResult(identified);
 
+      // Count this as a used scan
+      const remaining = await incrementScanCount();
+      setScansRemaining(remaining);
+
       const safety = getSafetyInfo(identified.scientificName) || {
         category: 'unknown', summary: '', uses: [], warnings: [],
       };
@@ -127,8 +162,12 @@ export default function App() {
         try {
           const jokeResult = await identifyAndJoke(capturedUri);
           setError(`NOT A PLANT: ${jokeResult.objectName.toUpperCase()}\n\n${jokeResult.joke}`);
+          // Non-plant scan still counts
+          const remaining = await incrementScanCount();
+          setScansRemaining(remaining);
         } catch (jokeErr) {
           setError(e.message);
+          // Network/API error — do NOT count against limit
         }
       } else {
         setError(e.message);
@@ -193,6 +232,97 @@ export default function App() {
     : null;
   const catStyle = safety ? getCategoryStyle(safety.category) : null;
 
+  // ── Scan counter badge for camera view ──────────────────────────
+  const renderScanCounter = () => {
+    const atLimit = scansRemaining === 0;
+    const lowScans = scansRemaining <= 2 && scansRemaining > 0;
+    const counterColor = atLimit ? '#ff7b8a' : lowScans ? '#ffb454' : '#4fe5d4';
+    const borderColor = atLimit
+      ? 'rgba(255, 123, 138, 0.5)'
+      : lowScans
+      ? 'rgba(255, 180, 84, 0.5)'
+      : 'rgba(79, 229, 212, 0.45)';
+
+    return (
+      <View style={[styles.scanCounter, { borderColor }]}>
+        <Text style={[styles.scanCounterText, { color: counterColor }]}>
+          {atLimit
+            ? '⚠ LIMIT REACHED'
+            : `◉ ${scansRemaining} / ${DAILY_SCAN_LIMIT} SCANS`}
+        </Text>
+      </View>
+    );
+  };
+
+  // ── Paywall modal ────────────────────────────────────────────────
+  const renderPaywall = () => (
+    <Modal
+      visible={showPaywall}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowPaywall(false)}
+    >
+      <View style={styles.paywallOverlay}>
+        <View style={styles.paywallCard}>
+          {/* Header */}
+          <View style={styles.paywallHeader}>
+            <Text style={styles.paywallIcon}>⬡</Text>
+            <Text style={styles.paywallTitle}>DAILY LIMIT REACHED</Text>
+          </View>
+
+          {/* Scan meter */}
+          <View style={styles.paywallMeter}>
+            <Text style={styles.paywallMeterLabel}>SCANS USED TODAY</Text>
+            <View style={styles.paywallMeterBar}>
+              <View style={styles.paywallMeterFill} />
+            </View>
+            <Text style={styles.paywallMeterCount}>
+              {DAILY_SCAN_LIMIT} / {DAILY_SCAN_LIMIT}
+            </Text>
+          </View>
+
+          {/* Sprout message */}
+          <View style={styles.sproutBox}>
+            <Text style={styles.sproutLabel}>🌿 SPROUT SAYS</Text>
+            <Text style={styles.sproutMsg}>
+              You've used all {DAILY_SCAN_LIMIT} scans for today, partner. Your codex recharges at midnight — or go Pro for unlimited scanning every day.
+            </Text>
+          </View>
+
+          {/* Pro features teaser */}
+          <View style={styles.proFeatures}>
+            <Text style={styles.proFeaturesTitle}>FLORA KNIGHT PRO</Text>
+            <Text style={styles.proFeatureItem}>✦  Unlimited daily scans</Text>
+            <Text style={styles.proFeatureItem}>✦  Premium Sprout voice lines</Text>
+            <Text style={styles.proFeatureItem}>✦  Cloud codex sync</Text>
+            <Text style={styles.proFeatureItem}>✦  Support the mission</Text>
+          </View>
+
+          {/* CTA buttons */}
+          <TouchableOpacity
+            style={styles.upgradeBtn}
+            onPress={() => {
+              Alert.alert(
+                'Coming Soon',
+                'FloraKnight Pro subscriptions are launching soon. Stay tuned!',
+                [{ text: 'Got it', style: 'default' }]
+              );
+            }}
+          >
+            <Text style={styles.upgradeBtnText}>⬡ UPGRADE TO PRO</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.dismissBtn}
+            onPress={() => setShowPaywall(false)}
+          >
+            <Text style={styles.dismissBtnText}>COME BACK TOMORROW</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   const renderNavBar = () => (
     <View style={styles.navBar}>
       <TouchableOpacity style={styles.navBtn} onPress={() => switchScreen('scanner')}>
@@ -219,178 +349,75 @@ export default function App() {
       <CodexScreen
         onBack={() => switchScreen('scanner')}
         onViewEntry={handleViewEntry}
+        renderNavBar={renderNavBar}
       />
     );
   }
 
-  if (codexEntry) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.previewContainer}>
-          {codexEntry.photoUri ? (
-            <Image source={{ uri: codexEntry.photoUri }} style={styles.preview} />
-          ) : (
-            <View style={[styles.preview, { backgroundColor: '#0f2a30' }]} />
-          )}
-        </View>
-
-        <View style={styles.resultPanel}>
-          <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
-            <Text style={styles.codexTag}>CODEX ENTRY</Text>
-            <Text style={styles.species}>{codexEntry.commonName}</Text>
-            <Text style={styles.latin}>{codexEntry.scientificName}</Text>
-
-            {safety && catStyle && (
-              <View style={[
-                styles.safetyBadge,
-                { borderColor: catStyle.color, backgroundColor: catStyle.color + '15' },
-              ]}>
-                <Text style={[styles.safetyIcon, { color: catStyle.color }]}>
-                  {catStyle.icon}
-                </Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.safetyLabel, { color: catStyle.color }]}>
-                    {catStyle.label}
-                  </Text>
-                  <Text style={styles.safetySummary}>{safety.summary}</Text>
-                </View>
-              </View>
-            )}
-
-            {safety && safety.category === 'toxic' && (
-              <View style={styles.dangerBanner}>
-                <Text style={styles.dangerText}>
-                  ⚠ DO NOT CONSUME — KEEP AWAY FROM CHILDREN AND PETS
-                </Text>
-              </View>
-            )}
-
-            {safety && safety.uses.length > 0 && (
-              <View style={styles.infoCard}>
-                <Text style={styles.cardTitle}>USES</Text>
-                {safety.uses.map((use, i) => (
-                  <Text key={i} style={styles.cardText}>• {use}</Text>
-                ))}
-              </View>
-            )}
-
-            {safety && safety.warnings.length > 0 && (
-              <View style={[styles.infoCard, { borderLeftColor: '#ffb454' }]}>
-                <Text style={[styles.cardTitle, { color: '#ffb454' }]}>WARNINGS</Text>
-                {safety.warnings.map((warn, i) => (
-                  <Text key={i} style={styles.cardText}>• {warn}</Text>
-                ))}
-              </View>
-            )}
-
-            <View style={styles.infoCard}>
-              <Text style={styles.cardTitle}>TAXONOMY</Text>
-              <Text style={styles.cardText}>Family: {codexEntry.family}</Text>
-              <Text style={styles.cardText}>Genus: {codexEntry.genus}</Text>
-            </View>
-
-            <Text style={styles.scannedAt}>
-              Scanned: {new Date(codexEntry.scannedAt).toLocaleDateString()}
-            </Text>
-
-            <TouchableOpacity
-              style={styles.narrateBtn}
-              onPress={handleNarrate}
-            >
-              <Text style={styles.narrateBtnText}>
-                {narrating ? '◼ STOP NARRATION' : '▶ NARRATE WITH SPROUT'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.btn} onPress={reset}>
-              <Text style={styles.btnText}>Back to scanner</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-
-        {renderNavBar()}
-      </View>
-    );
-  }
-
+  // ── Results / scanning state ─────────────────────────────────────
   if (photo) {
+    const scanTranslate = scanLineY.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 200],
+    });
+
     return (
       <View style={styles.container}>
         <View style={styles.previewContainer}>
           <Image source={{ uri: photo }} style={styles.preview} />
           {scanning && (
             <Animated.View
-              style={[
-                styles.scanBeam,
-                {
-                  transform: [{
-                    translateY: scanLineY.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [10, 290],
-                    }),
-                  }],
-                },
-              ]}
+              style={[styles.scanBeam, { transform: [{ translateY: scanTranslate }] }]}
             />
           )}
         </View>
 
         <View style={styles.resultPanel}>
-          <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
+          <ScrollView showsVerticalScrollIndicator={false}>
             {scanning && (
               <View style={styles.scanningBox}>
-                <ActivityIndicator size="large" color="#4fe5d4" />
-                <Text style={styles.scanningText}>ANALYZING SUBJECT...</Text>
+                <ActivityIndicator color="#4fe5d4" size="large" />
+                <Text style={styles.scanningText}>ANALYZING SPECIMEN...</Text>
               </View>
             )}
 
-            {error && (
-              <View style={error.startsWith('NOT A PLANT')
-                ? styles.jokeBox
-                : styles.errorBox
-              }>
-                <Text style={error.startsWith('NOT A PLANT')
-                  ? styles.jokeTitle
-                  : styles.errorTitle
-                }>
-                  {error.startsWith('NOT A PLANT') ? '🌿 SPROUT SAYS...' : 'SCAN FAILED'}
-                </Text>
-                <Text style={error.startsWith('NOT A PLANT')
-                  ? styles.jokeMsg
-                  : styles.errorMsg
-                }>
-                  {error.startsWith('NOT A PLANT') ? error.replace('NOT A PLANT: ', '') : error}
-                </Text>
-              </View>
-            )}
-
-            {result && safety && catStyle && (
-              <>
-                <Text style={styles.codexTag}>SUBJECT IDENTIFIED</Text>
-                <Text style={styles.species}>{result.commonName}</Text>
-                <Text style={styles.latin}>{result.scientificName}</Text>
-
-                <View style={[
-                  styles.safetyBadge,
-                  { borderColor: catStyle.color, backgroundColor: catStyle.color + '15' },
-                ]}>
-                  <Text style={[styles.safetyIcon, { color: catStyle.color }]}>
-                    {catStyle.icon}
-                  </Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.safetyLabel, { color: catStyle.color }]}>
-                      {catStyle.label}
-                    </Text>
-                    <Text style={styles.safetySummary}>{safety.summary}</Text>
-                  </View>
+            {error && !scanning && (
+              error.startsWith('NOT A PLANT:') ? (
+                <View style={styles.jokeBox}>
+                  <Text style={styles.jokeTitle}>🌿 SPROUT SAYS...</Text>
+                  <Text style={styles.jokeMsg}>{error.replace('NOT A PLANT: ', '')}</Text>
                 </View>
+              ) : (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorTitle}>SCAN ERROR</Text>
+                  <Text style={styles.errorMsg}>{error}</Text>
+                </View>
+              )
+            )}
 
-                {safety.category === 'toxic' && (
-                  <View style={styles.dangerBanner}>
-                    <Text style={styles.dangerText}>
-                      ⚠ DO NOT CONSUME — KEEP AWAY FROM CHILDREN AND PETS
-                    </Text>
-                  </View>
+            {result && !scanning && (
+              <>
+                {codexEntry && (
+                  <Text style={styles.codexTag}>◈ CODEX ENTRY</Text>
+                )}
+                <Text style={styles.species}>{activeResult.commonName}</Text>
+                <Text style={styles.latin}>{activeResult.scientificName}</Text>
+
+                {safety && catStyle && (
+                  <>
+                    {safety.category === 'toxic' && (
+                      <View style={styles.dangerBanner}>
+                        <Text style={styles.dangerText}>⚠ DO NOT CONSUME — TOXIC PLANT</Text>
+                      </View>
+                    )}
+                    <View style={[styles.safetyBadge, { borderColor: catStyle.color, backgroundColor: catStyle.bg }]}>
+                      <Text style={[styles.safetyIcon, { color: catStyle.color }]}>{catStyle.icon}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.safetyLabel, { color: catStyle.color }]}>{catStyle.label}</Text>
+                        <Text style={styles.safetySummary}>{safety.summary}</Text>
+                      </View>
+                    </View>
+                  </>
                 )}
 
                 <View style={styles.confidenceBox}>
@@ -401,20 +428,20 @@ export default function App() {
                   </View>
                 </View>
 
-                {safety.uses.length > 0 && (
+                {safety && safety.uses.length > 0 && (
                   <View style={styles.infoCard}>
-                    <Text style={styles.cardTitle}>USES</Text>
-                    {safety.uses.map((use, i) => (
-                      <Text key={i} style={styles.cardText}>• {use}</Text>
+                    <Text style={styles.cardTitle}>KNOWN USES</Text>
+                    {safety.uses.map((u, i) => (
+                      <Text key={i} style={styles.cardText}>• {u}</Text>
                     ))}
                   </View>
                 )}
 
-                {safety.warnings.length > 0 && (
-                  <View style={[styles.infoCard, { borderLeftColor: '#ffb454' }]}>
-                    <Text style={[styles.cardTitle, { color: '#ffb454' }]}>WARNINGS</Text>
-                    {safety.warnings.map((warn, i) => (
-                      <Text key={i} style={styles.cardText}>• {warn}</Text>
+                {safety && safety.warnings.length > 0 && (
+                  <View style={styles.infoCard}>
+                    <Text style={styles.cardTitle}>WARNINGS</Text>
+                    {safety.warnings.map((w, i) => (
+                      <Text key={i} style={styles.cardText}>⚠ {w}</Text>
                     ))}
                   </View>
                 )}
@@ -474,6 +501,7 @@ export default function App() {
     );
   }
 
+  // ── Camera view (default) ────────────────────────────────────────
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={styles.camera} facing="back" />
@@ -483,13 +511,24 @@ export default function App() {
         <View style={[styles.corner, styles.bl]} />
         <View style={[styles.corner, styles.br]} />
       </View>
+
+      {/* Top label */}
       <View style={styles.topLabel} pointerEvents="none">
         <Text style={styles.topLabelText}>● SCAN MODE</Text>
       </View>
-      <TouchableOpacity style={styles.captureBtn} onPress={takePhoto}>
-        <View style={styles.captureBtnInner} />
+
+      {/* Scan counter badge */}
+      {renderScanCounter()}
+
+      {/* Capture button — dims when at limit */}
+      <TouchableOpacity
+        style={[styles.captureBtn, scansRemaining === 0 && styles.captureBtnDisabled]}
+        onPress={takePhoto}
+      >
+        <View style={[styles.captureBtnInner, scansRemaining === 0 && styles.captureBtnInnerDisabled]} />
       </TouchableOpacity>
 
+      {renderPaywall()}
       {renderNavBar()}
     </View>
   );
@@ -522,6 +561,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 6, borderRadius: 4,
   },
   topLabelText: { color: '#4fe5d4', fontSize: 11, letterSpacing: 2, fontWeight: '500' },
+
+  // Scan counter badge
+  scanCounter: {
+    position: 'absolute', top: 108, alignSelf: 'center',
+    backgroundColor: 'rgba(10, 26, 31, 0.82)',
+    borderWidth: 1,
+    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4,
+  },
+  scanCounterText: { fontSize: 10, letterSpacing: 2, fontWeight: '600' },
+
   hud: { position: 'absolute', top: 110, left: 32, right: 32, bottom: 200 },
   corner: { position: 'absolute', width: 28, height: 28, borderColor: '#4fe5d4', borderWidth: 2 },
   tl: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0 },
@@ -534,7 +583,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#4fe5d4', alignItems: 'center', justifyContent: 'center',
     borderWidth: 3, borderColor: 'rgba(232, 255, 251, 0.85)',
   },
+  captureBtnDisabled: {
+    backgroundColor: 'rgba(255, 123, 138, 0.3)',
+    borderColor: 'rgba(255, 123, 138, 0.5)',
+  },
   captureBtnInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#2cb5a7' },
+  captureBtnInnerDisabled: { backgroundColor: '#7a3040' },
   resultPanel: {
     position: 'absolute', top: '40%', left: 0, right: 0, bottom: 56,
     backgroundColor: 'rgba(10, 26, 31, 0.97)', padding: 22,
@@ -630,4 +684,137 @@ const styles = StyleSheet.create({
   navBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   navIcon: { color: '#8fb4b0', fontSize: 20, marginBottom: 2 },
   navLabel: { color: '#8fb4b0', fontSize: 8, letterSpacing: 2, fontWeight: '600' },
+
+  // ── Paywall modal styles ─────────────────────────────────────────
+  paywallOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(6, 14, 17, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  paywallCard: {
+    width: '100%',
+    backgroundColor: '#0f2a30',
+    borderWidth: 1.5,
+    borderColor: '#f3c46a',
+    borderRadius: 8,
+    padding: 24,
+    shadowColor: '#f3c46a',
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 20,
+  },
+  paywallHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  paywallIcon: {
+    fontSize: 36,
+    color: '#f3c46a',
+    marginBottom: 8,
+  },
+  paywallTitle: {
+    color: '#f3c46a',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 3,
+  },
+  paywallMeter: {
+    backgroundColor: 'rgba(255, 123, 138, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 123, 138, 0.3)',
+    borderRadius: 4,
+    padding: 12,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  paywallMeterLabel: {
+    color: '#8fb4b0',
+    fontSize: 9,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  paywallMeterBar: {
+    width: '100%',
+    height: 6,
+    backgroundColor: 'rgba(255, 123, 138, 0.15)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  paywallMeterFill: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#ff7b8a',
+    borderRadius: 3,
+  },
+  paywallMeterCount: {
+    color: '#ff7b8a',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  sproutBox: {
+    backgroundColor: 'rgba(108, 217, 163, 0.08)',
+    borderLeftWidth: 2,
+    borderLeftColor: '#6cd9a3',
+    padding: 12,
+    borderRadius: 4,
+    marginBottom: 16,
+  },
+  sproutLabel: {
+    color: '#6cd9a3',
+    fontSize: 9,
+    letterSpacing: 2,
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  sproutMsg: {
+    color: '#e8fffb',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  proFeatures: {
+    marginBottom: 20,
+  },
+  proFeaturesTitle: {
+    color: '#f3c46a',
+    fontSize: 10,
+    letterSpacing: 2.5,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
+  proFeatureItem: {
+    color: '#8fb4b0',
+    fontSize: 13,
+    lineHeight: 22,
+  },
+  upgradeBtn: {
+    backgroundColor: '#f3c46a',
+    paddingVertical: 14,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  upgradeBtnText: {
+    color: '#0a1a1f',
+    fontWeight: '700',
+    letterSpacing: 2.5,
+    fontSize: 12,
+  },
+  dismissBtn: {
+    paddingVertical: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(79, 229, 212, 0.35)',
+    alignItems: 'center',
+  },
+  dismissBtnText: {
+    color: '#4fe5d4',
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontSize: 11,
+  },
 });
